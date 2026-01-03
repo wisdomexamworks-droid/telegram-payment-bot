@@ -1,13 +1,10 @@
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
-const fetch = require('node-fetch'); // 👈 ADD THIS
-
-const TelegramBot = require('node-telegram-bot-api');
-const express = require('express');
 
 /* ======================
    CONFIG
-   ====================== */
+====================== */
+
 const SHEET_WEBHOOK_URL =
   'https://script.google.com/macros/s/AKfycbyjwJ7tx4vAZclhaemeHrJw5GbE-hIo3erWohQyVKryXs3QWY0ztBT5epEKnV1upF4P/exec';
 
@@ -15,26 +12,30 @@ const token = process.env.BOT_TOKEN;
 const ADMIN_CHAT_ID = '779962598';
 
 if (!token) {
-  throw new Error("BOT_TOKEN is not defined in environment variables");
+  throw new Error('BOT_TOKEN is not defined in environment variables');
+}
+
+if (typeof fetch !== 'function') {
+  throw new Error('Global fetch not available. Node 18+ required.');
 }
 
 /* ======================
    BOT + SERVER
-   ====================== */
+====================== */
 
-const bot = new TelegramBot(token); // Webhook mode
+const bot = new TelegramBot(token); // webhook mode
 const app = express();
 app.use(express.json());
 
 /* ======================
    USER STATE
-   ====================== */
+====================== */
 
 const users = {};
 
 /* ======================
    START COMMAND
-   ====================== */
+====================== */
 
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
@@ -45,9 +46,9 @@ bot.onText(/\/start/, (msg) => {
     chatId,
 `👋 Welcome to *Wisdom Exam Works* – Mentorship Registration
 
-⚠️ *Disclaimer*:  
-The details you share are safe & secure 🔐  
-They are visible only to the admin for payment verification.
+⚠️ *Disclaimer*
+Your details are safe & secure 🔐  
+Visible only to admin for payment verification.
 
 Please *Enter Your Registered User Name* 👇`,
     { parse_mode: 'Markdown' }
@@ -56,9 +57,9 @@ Please *Enter Your Registered User Name* 👇`,
 
 /* ======================
    MESSAGE HANDLER
-   ====================== */
+====================== */
 
-bot.on('message', (msg) => {
+bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const user = users[chatId];
 
@@ -75,27 +76,29 @@ bot.on('message', (msg) => {
     return;
   }
 
-  /* 🔹 ADMIN → STUDENT DIRECT CHAT */
+  /* 🔹 ADMIN → STUDENT (REPLY-BASED, SAFE) */
   if (
     msg.chat.id.toString() === ADMIN_CHAT_ID &&
-    Object.values(users).some(u => u.step === 'admin_chat')
+    msg.reply_to_message &&
+    msg.reply_to_message.text &&
+    msg.reply_to_message.text.includes('Type your message below')
   ) {
     const entry = Object.entries(users).find(
       ([_, u]) => u.step === 'admin_chat'
     );
 
-    if (entry) {
-      const [studentChatId] = entry;
+    if (!entry) return;
 
-      bot.sendMessage(
-        studentChatId,
-        `💬 *Message from Support:*\n${msg.text}`,
-        { parse_mode: 'Markdown' }
-      );
+    const [studentChatId] = entry;
 
-      delete users[studentChatId];
-      return;
-    }
+    bot.sendMessage(
+      studentChatId,
+      `💬 *Message from Support:*\n${msg.text}`,
+      { parse_mode: 'Markdown' }
+    );
+
+    delete users[studentChatId];
+    return;
   }
 
   if (!user) return;
@@ -131,33 +134,36 @@ bot.on('message', (msg) => {
   }
 });
 
-
+/* ======================
+   SEND TO GOOGLE SHEET
+====================== */
 
 async function sendToSheet(user, chatId) {
-  try {
-    await fetch(SHEET_WEBHOOK_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        name: user.name,
-        email: user.email,
-        telegramId: chatId,
-        phone: user.phone,
-        course: user.course,
-        utr: user.utr,
-        status: 'Pending'
-      })
-    });
-  } catch (err) {
-    console.error('❌ Sheet error:', err.message);
+  const response = await fetch(SHEET_WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: user.name,
+      email: user.email,
+      telegramId: chatId,
+      phone: user.phone,
+      course: user.course,
+      utr: user.utr,
+      status: 'Pending'
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Sheet HTTP error: ${response.status}`);
   }
+
+  const text = await response.text();
+  console.log('📄 Sheet response:', text);
 }
 
 /* ======================
    PHOTO HANDLER
-   ====================== */
+====================== */
 
 bot.on('photo', async (msg) => {
   const chatId = msg.chat.id;
@@ -167,7 +173,8 @@ bot.on('photo', async (msg) => {
   const photoId = msg.photo[msg.photo.length - 1].file_id;
 
   bot.sendPhoto(ADMIN_CHAT_ID, photoId, {
-    caption: `🧾 *New Payment Submission*
+    caption:
+`🧾 *New Payment Submission*
 
 👤 Name: ${user.name}
 📧 Email: ${user.email}
@@ -188,8 +195,11 @@ bot.on('photo', async (msg) => {
     }
   });
 
-  // 🔥 GOOGLE SHEET-KU DATA SEND
-  await sendToSheet(user, chatId);
+  try {
+    await sendToSheet(user, chatId);
+  } catch (err) {
+    console.error('❌ Sheet error:', err.message);
+  }
 
   bot.sendMessage(
     chatId,
@@ -206,10 +216,9 @@ bot.on('photo', async (msg) => {
   delete users[chatId];
 });
 
-
 /* ======================
    CALLBACK HANDLER
-   ====================== */
+====================== */
 
 bot.on('callback_query', (query) => {
   const data = query.data;
@@ -228,7 +237,7 @@ bot.on('callback_query', (query) => {
     return bot.answerCallbackQuery(query.id);
   }
 
-  /* 🔹 ADMIN CHAT INITIATION */
+  /* 🔹 ADMIN CHAT INIT */
   if (data.startsWith('adminchat_') && fromId === ADMIN_CHAT_ID) {
     const studentChatId = data.split('_')[1];
     users[studentChatId] = { step: 'admin_chat' };
@@ -241,7 +250,7 @@ bot.on('callback_query', (query) => {
     return bot.answerCallbackQuery(query.id);
   }
 
-  /* 🔒 ADMIN ONLY ACTIONS */
+  /* 🔒 ADMIN ONLY */
   if (fromId !== ADMIN_CHAT_ID) {
     return bot.answerCallbackQuery(query.id, { text: '❌ Unauthorized' });
   }
@@ -251,7 +260,7 @@ bot.on('callback_query', (query) => {
   if (action === 'approve') {
     bot.sendMessage(
       studentChatId,
-      '🎉 *Payment Approved!*\n\nLogin access will be shared shortly.\n\nPlease check your registered  mail ✉️ and join in your respective telegram group 👥 for further details',
+      '🎉 *Payment Approved!*\n\nLogin access will be shared shortly.\nPlease check your registered email ✉️',
       { parse_mode: 'Markdown' }
     );
     return bot.answerCallbackQuery(query.id, { text: '✅ Approved' });
@@ -269,7 +278,7 @@ bot.on('callback_query', (query) => {
 
 /* ======================
    WEBHOOK (RENDER)
-   ====================== */
+====================== */
 
 app.post(`/bot${token}`, (req, res) => {
   bot.processUpdate(req.body);
@@ -279,7 +288,7 @@ app.post(`/bot${token}`, (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, async () => {
-  console.log("🚀 Server running");
+  console.log('🚀 Server running');
   await bot.setWebHook(
     `https://telegram-payment-bot-3vk9.onrender.com/bot${token}`
   );
