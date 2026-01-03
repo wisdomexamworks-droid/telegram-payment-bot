@@ -5,7 +5,7 @@ const express = require('express');
    CONFIG
    ====================== */
 
-const token = process.env.BOT_TOKEN;        // ONLY token source
+const token = process.env.BOT_TOKEN;
 const ADMIN_CHAT_ID = '779962598';
 
 if (!token) {
@@ -16,7 +16,7 @@ if (!token) {
    BOT + SERVER
    ====================== */
 
-const bot = new TelegramBot(token); // ✅ NO polling
+const bot = new TelegramBot(token); // Webhook mode
 const app = express();
 app.use(express.json());
 
@@ -27,7 +27,7 @@ app.use(express.json());
 const users = {};
 
 /* ======================
-   BOT LOGIC
+   START COMMAND
    ====================== */
 
 bot.onText(/\/start/, (msg) => {
@@ -37,12 +37,11 @@ bot.onText(/\/start/, (msg) => {
 
   bot.sendMessage(
     chatId,
-`Welcome message to Change: 
+`👋 Welcome to *Wisdom Exam Works* – Mentorship Registration
 
- 👋 Welcome to *Wisdom Exam Works* – Mentorship Registration
-
-⚠️ Disclaimer : Details you shared will be safe and secure. It will be visible only to admin to 
-ensure the privacy of our students and for payment authentication. 🔐
+⚠️ *Disclaimer*:  
+The details you share are safe & secure 🔐  
+They are visible only to the admin for payment verification.
 
 Please *Enter Your Registered User Name* 👇`,
     { parse_mode: 'Markdown' }
@@ -55,9 +54,10 @@ Please *Enter Your Registered User Name* 👇`,
 
 bot.on('message', (msg) => {
   const chatId = msg.chat.id;
+  const user = users[chatId];
 
-  /* 🔹 SUPPORT CHAT HANDLER */
-  if (users[chatId] && users[chatId].step === 'support' && msg.text) {
+  /* 🔹 STUDENT → SUPPORT */
+  if (user && user.step === 'support' && msg.text) {
     bot.sendMessage(
       ADMIN_CHAT_ID,
       `📩 *New Support Message*\n\n👤 User ID: ${chatId}\n💬 Message:\n${msg.text}`,
@@ -69,8 +69,30 @@ bot.on('message', (msg) => {
     return;
   }
 
-  if (!users[chatId]) return;
-  const user = users[chatId];
+  /* 🔹 ADMIN → STUDENT DIRECT CHAT */
+  if (
+    msg.chat.id.toString() === ADMIN_CHAT_ID &&
+    Object.values(users).some(u => u.step === 'admin_chat')
+  ) {
+    const entry = Object.entries(users).find(
+      ([_, u]) => u.step === 'admin_chat'
+    );
+
+    if (entry) {
+      const [studentChatId] = entry;
+
+      bot.sendMessage(
+        studentChatId,
+        `💬 *Message from Support:*\n${msg.text}`,
+        { parse_mode: 'Markdown' }
+      );
+
+      delete users[studentChatId];
+      return;
+    }
+  }
+
+  if (!user) return;
 
   if (user.step === 1 && msg.text) {
     user.name = msg.text;
@@ -131,6 +153,9 @@ bot.on('photo', (msg) => {
         [
           { text: '✅ Approve', callback_data: `approve_${chatId}` },
           { text: '❌ Reject', callback_data: `reject_${chatId}` }
+        ],
+        [
+          { text: '💬 Message Student', callback_data: `adminchat_${chatId}` }
         ]
       ]
     }
@@ -159,7 +184,7 @@ bot.on('callback_query', (query) => {
   const data = query.data;
   const fromId = query.from.id.toString();
 
-  /* 🔹 SUPPORT BUTTON */
+  /* 🔹 STUDENT SUPPORT */
   if (data.startsWith('support_')) {
     const studentChatId = data.split('_')[1];
     users[studentChatId] = { step: 'support' };
@@ -172,11 +197,22 @@ bot.on('callback_query', (query) => {
     return bot.answerCallbackQuery(query.id);
   }
 
-  /* 🔒 ADMIN ONLY */
+  /* 🔹 ADMIN CHAT INITIATION */
+  if (data.startsWith('adminchat_') && fromId === ADMIN_CHAT_ID) {
+    const studentChatId = data.split('_')[1];
+    users[studentChatId] = { step: 'admin_chat' };
+
+    bot.sendMessage(
+      ADMIN_CHAT_ID,
+      `✍️ Type your message below.\nIt will be sent to student (${studentChatId}).`
+    );
+
+    return bot.answerCallbackQuery(query.id);
+  }
+
+  /* 🔒 ADMIN ONLY ACTIONS */
   if (fromId !== ADMIN_CHAT_ID) {
-    return bot.answerCallbackQuery(query.id, {
-      text: '❌ You are not authorized'
-    });
+    return bot.answerCallbackQuery(query.id, { text: '❌ Unauthorized' });
   }
 
   const [action, studentChatId] = data.split('_');
@@ -187,7 +223,7 @@ bot.on('callback_query', (query) => {
       '🎉 *Payment Approved!*\n\nLogin access will be shared shortly.',
       { parse_mode: 'Markdown' }
     );
-    bot.answerCallbackQuery(query.id, { text: '✅ Student Approved' });
+    return bot.answerCallbackQuery(query.id, { text: '✅ Approved' });
   }
 
   if (action === 'reject') {
@@ -196,30 +232,7 @@ bot.on('callback_query', (query) => {
       '❌ *Payment Rejected*\n\nPlease contact support or re-upload correct details.',
       { parse_mode: 'Markdown' }
     );
-    bot.answerCallbackQuery(query.id, { text: '❌ Student Rejected' });
-  }
-});
-
-/* ======================
-   ADMIN REPLY → STUDENT
-   ====================== */
-
-bot.on('message', (msg) => {
-  if (
-    msg.chat.id.toString() === ADMIN_CHAT_ID &&
-    msg.reply_to_message &&
-    msg.reply_to_message.text
-  ) {
-    const match = msg.reply_to_message.text.match(/User ID:\s(\d+)/);
-
-    if (match) {
-      const studentChatId = match[1];
-      bot.sendMessage(
-        studentChatId,
-        `💬 *Support Reply:*\n${msg.text}`,
-        { parse_mode: 'Markdown' }
-      );
-    }
+    return bot.answerCallbackQuery(query.id, { text: '❌ Rejected' });
   }
 });
 
@@ -236,7 +249,6 @@ const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, async () => {
   console.log("🚀 Server running");
-
   await bot.setWebHook(
     `https://telegram-payment-bot-3vk9.onrender.com/bot${token}`
   );
