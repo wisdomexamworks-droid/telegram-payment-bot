@@ -18,7 +18,6 @@ if (!token) {
 
 const bot = new TelegramBot(token); // ✅ NO polling
 const app = express();
-
 app.use(express.json());
 
 /* ======================
@@ -38,17 +37,39 @@ bot.onText(/\/start/, (msg) => {
 
   bot.sendMessage(
     chatId,
-`👋 Welcome to *Wisdom Exam Works* – Mentorship Registration
+`Welcome message to Change: 
+
+ 👋 Welcome to *Wisdom Exam Works* – Mentorship Registration
+
+⚠️ Disclaimer : Details you shared will be safe and secure. It will be visible only to admin to 
+ensure the privacy of our students and for payment authentication. 🔐
 
 Please *Enter Your Registered User Name* 👇`,
     { parse_mode: 'Markdown' }
   );
 });
 
+/* ======================
+   MESSAGE HANDLER
+   ====================== */
+
 bot.on('message', (msg) => {
   const chatId = msg.chat.id;
-  if (!users[chatId]) return;
 
+  /* 🔹 SUPPORT CHAT HANDLER */
+  if (users[chatId] && users[chatId].step === 'support' && msg.text) {
+    bot.sendMessage(
+      ADMIN_CHAT_ID,
+      `📩 *New Support Message*\n\n👤 User ID: ${chatId}\n💬 Message:\n${msg.text}`,
+      { parse_mode: 'Markdown' }
+    );
+
+    bot.sendMessage(chatId, '✅ Your message has been sent to support.');
+    delete users[chatId];
+    return;
+  }
+
+  if (!users[chatId]) return;
   const user = users[chatId];
 
   if (user.step === 1 && msg.text) {
@@ -82,6 +103,10 @@ bot.on('message', (msg) => {
   }
 });
 
+/* ======================
+   PHOTO HANDLER
+   ====================== */
+
 bot.on('photo', (msg) => {
   const chatId = msg.chat.id;
   const user = users[chatId];
@@ -113,17 +138,42 @@ bot.on('photo', (msg) => {
 
   bot.sendMessage(
     chatId,
-    '✅ Payment details received.\nPlease wait for verification.'
+    '✅ Payment details received.\nPlease wait for verification.\n\nNeed help?',
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '💬 Contact Support', callback_data: `support_${chatId}` }]
+        ]
+      }
+    }
   );
 
   delete users[chatId];
 });
 
+/* ======================
+   CALLBACK HANDLER
+   ====================== */
+
 bot.on('callback_query', (query) => {
   const data = query.data;
-  const adminId = query.from.id.toString();
+  const fromId = query.from.id.toString();
 
-  if (adminId !== ADMIN_CHAT_ID) {
+  /* 🔹 SUPPORT BUTTON */
+  if (data.startsWith('support_')) {
+    const studentChatId = data.split('_')[1];
+    users[studentChatId] = { step: 'support' };
+
+    bot.sendMessage(
+      studentChatId,
+      '💬 Please type your issue below.\nOur support team will reply soon.'
+    );
+
+    return bot.answerCallbackQuery(query.id);
+  }
+
+  /* 🔒 ADMIN ONLY */
+  if (fromId !== ADMIN_CHAT_ID) {
     return bot.answerCallbackQuery(query.id, {
       text: '❌ You are not authorized'
     });
@@ -147,6 +197,29 @@ bot.on('callback_query', (query) => {
       { parse_mode: 'Markdown' }
     );
     bot.answerCallbackQuery(query.id, { text: '❌ Student Rejected' });
+  }
+});
+
+/* ======================
+   ADMIN REPLY → STUDENT
+   ====================== */
+
+bot.on('message', (msg) => {
+  if (
+    msg.chat.id.toString() === ADMIN_CHAT_ID &&
+    msg.reply_to_message &&
+    msg.reply_to_message.text
+  ) {
+    const match = msg.reply_to_message.text.match(/User ID:\s(\d+)/);
+
+    if (match) {
+      const studentChatId = match[1];
+      bot.sendMessage(
+        studentChatId,
+        `💬 *Support Reply:*\n${msg.text}`,
+        { parse_mode: 'Markdown' }
+      );
+    }
   }
 });
 
