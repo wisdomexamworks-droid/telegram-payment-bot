@@ -251,7 +251,7 @@ bot.on('callback_query', (query) => {
   if (action === 'approve') {
     bot.sendMessage(
       studentChatId,
-      '🎉 *Payment Approved!*\n\nLogin access will be shared shortly.',
+      '🎉 *Payment Approved!*\n\nLogin access will be shared shortly.\n\nPlease check your registered  mail ✉️ and join in your respective telegram group 👥 for further details',
       { parse_mode: 'Markdown' }
     );
     return bot.answerCallbackQuery(query.id, { text: '✅ Approved' });
