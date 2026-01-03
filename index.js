@@ -1,9 +1,15 @@
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
+const fetch = require('node-fetch'); // 👈 ADD THIS
+
+const TelegramBot = require('node-telegram-bot-api');
+const express = require('express');
 
 /* ======================
    CONFIG
    ====================== */
+const SHEET_WEBHOOK_URL =
+  'https://script.google.com/macros/s/AKfycbzx49MWRaCz6HoeGakx12fSgIdr6mcNKDyzhXn53fT1yowc0G-cdl2eyi7r87YbRQyl/exec';
 
 const token = process.env.BOT_TOKEN;
 const ADMIN_CHAT_ID = '779962598';
@@ -125,11 +131,35 @@ bot.on('message', (msg) => {
   }
 });
 
+
+
+async function sendToSheet(user, chatId) {
+  try {
+    await fetch(SHEET_WEBHOOK_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        name: user.name,
+        email: user.email,
+        telegramId: chatId,
+        phone: user.phone,
+        course: user.course,
+        utr: user.utr,
+        status: 'Pending'
+      })
+    });
+  } catch (err) {
+    console.error('❌ Sheet error:', err.message);
+  }
+}
+
 /* ======================
    PHOTO HANDLER
    ====================== */
 
-bot.on('photo', (msg) => {
+bot.on('photo', async (msg) => {
   const chatId = msg.chat.id;
   const user = users[chatId];
   if (!user || user.step !== 6) return;
@@ -137,16 +167,13 @@ bot.on('photo', (msg) => {
   const photoId = msg.photo[msg.photo.length - 1].file_id;
 
   bot.sendPhoto(ADMIN_CHAT_ID, photoId, {
-    caption:
-`🧾 *New Payment Submission*
+    caption: `🧾 *New Payment Submission*
 
 👤 Name: ${user.name}
 📧 Email: ${user.email}
 📞 Phone: ${user.phone}
 📚 Course: ${user.course}
-💳 UTR: ${user.utr}
-
-👆 Verify and choose action below`,
+💳 UTR: ${user.utr}`,
     parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
@@ -160,6 +187,9 @@ bot.on('photo', (msg) => {
       ]
     }
   });
+
+  // 🔥 GOOGLE SHEET-KU DATA SEND
+  await sendToSheet(user, chatId);
 
   bot.sendMessage(
     chatId,
@@ -175,6 +205,7 @@ bot.on('photo', (msg) => {
 
   delete users[chatId];
 });
+
 
 /* ======================
    CALLBACK HANDLER
