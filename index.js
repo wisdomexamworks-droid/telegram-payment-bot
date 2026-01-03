@@ -9,7 +9,7 @@ const express = require('express');
    CONFIG
    ====================== */
 const SHEET_WEBHOOK_URL =
-  'https://script.google.com/macros/s/AKfycbzx49MWRaCz6HoeGakx12fSgIdr6mcNKDyzhXn53fT1yowc0G-cdl2eyi7r87YbRQyl/exec';
+  'https://script.google.com/macros/s/AKfycbyjwJ7tx4vAZclhaemeHrJw5GbE-hIo3erWohQyVKryXs3QWY0ztBT5epEKnV1upF4P/exec';
 
 const token = process.env.BOT_TOKEN;
 const ADMIN_CHAT_ID = '779962598';
