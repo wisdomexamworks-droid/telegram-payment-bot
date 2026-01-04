@@ -1,3 +1,7 @@
+if (typeof fetch !== 'function') {
+  throw new Error('Global fetch not available. Node 18+ required.');
+}
+
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 
