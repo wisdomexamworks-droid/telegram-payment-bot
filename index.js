@@ -12,18 +12,18 @@ const token = process.env.BOT_TOKEN;
 const ADMIN_CHAT_ID = '779962598';
 
 if (!token) {
-  throw new Error('BOT_TOKEN is not defined in environment variables');
+  throw new Error('BOT_TOKEN is not defined');
 }
 
 if (typeof fetch !== 'function') {
-  throw new Error('Global fetch not available. Node 18+ required.');
+  throw new Error('Node 18+ required (global fetch missing)');
 }
 
 /* ======================
    BOT + SERVER
 ====================== */
 
-const bot = new TelegramBot(token); // webhook mode
+const bot = new TelegramBot(token); // webhook
 const app = express();
 app.use(express.json());
 
@@ -34,21 +34,19 @@ app.use(express.json());
 const users = {};
 
 /* ======================
-   START COMMAND
+   START
 ====================== */
 
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
-
   users[chatId] = { step: 1 };
 
   bot.sendMessage(
     chatId,
 `👋 Welcome to *Wisdom Exam Works* – Mentorship Registration
 
-⚠️ *Disclaimer*
-Your details are safe & secure 🔐  
-Visible only to admin for payment verification.
+⚠️ Your details are secure 🔐  
+Visible only to admin for verification.
 
 Please *Enter Your Registered User Name* 👇`,
     { parse_mode: 'Markdown' }
@@ -56,81 +54,50 @@ Please *Enter Your Registered User Name* 👇`,
 });
 
 /* ======================
-   MESSAGE HANDLER
+   MESSAGE HANDLER (STUDENT FLOW)
 ====================== */
 
-bot.on('message', async (msg) => {
+bot.on('message', (msg) => {
   const chatId = msg.chat.id;
   const user = users[chatId];
 
-  /* 🔹 STUDENT → SUPPORT */
+  // Student → Support
   if (user && user.step === 'support' && msg.text) {
     bot.sendMessage(
       ADMIN_CHAT_ID,
-      `📩 *New Support Message*\n\n👤 User ID: ${chatId}\n💬 Message:\n${msg.text}`,
+      `📩 *Support Message*\n\n👤 Student ID: ${chatId}\n💬 ${msg.text}`,
       { parse_mode: 'Markdown' }
     );
-
-    bot.sendMessage(chatId, '✅ Your message has been sent to support.');
+    bot.sendMessage(chatId, '✅ Message sent to support.');
     delete users[chatId];
-    return;
-  }
-
-  /* 🔹 ADMIN → STUDENT (REPLY-BASED, SAFE) */
-  if (
-    msg.chat.id.toString() === ADMIN_CHAT_ID &&
-    msg.reply_to_message &&
-    msg.reply_to_message.text &&
-    msg.reply_to_message.text.includes('Type your message below')
-  ) {
-    const entry = Object.entries(users).find(
-      ([_, u]) => u.step === 'admin_chat'
-    );
-
-    if (!entry) return;
-
-    const [studentChatId] = entry;
-
-    bot.sendMessage(
-      studentChatId,
-      `💬 *Message from Support:*\n${msg.text}`,
-      { parse_mode: 'Markdown' }
-    );
-
-    delete users[studentChatId];
     return;
   }
 
   if (!user) return;
 
   if (user.step === 1 && msg.text) {
-    user.name = msg.text;
-    user.step = 2;
-    return bot.sendMessage(chatId, '📧 Enter your Registered Email ID:');
+    user.name = msg.text; user.step = 2;
+    return bot.sendMessage(chatId, '📧 Enter your Email ID:');
   }
 
   if (user.step === 2 && msg.text) {
-    user.email = msg.text;
-    user.step = 3;
-    return bot.sendMessage(chatId, '📞 Enter your Registered Telegram Number:');
+    user.email = msg.text; user.step = 3;
+    return bot.sendMessage(chatId, '📞 Enter Telegram Number:');
   }
 
   if (user.step === 3 && msg.text) {
-    user.phone = msg.text;
-    user.step = 4;
-    return bot.sendMessage(chatId, '📚 Enter Course Name (CGL Full time / CGL Part time):');
+    user.phone = msg.text; user.step = 4;
+    return bot.sendMessage(chatId, '📚 Enter Course Name:');
   }
 
   if (user.step === 4 && msg.text) {
-    user.course = msg.text;
-    user.step = 5;
-    return bot.sendMessage(chatId, '💳 Enter UPI / Transaction Reference Number:');
+    user.course = msg.text; user.step = 5;
+    return bot.sendMessage(chatId, '💳 Enter UTR / Transaction ID:');
   }
 
   if (user.step === 5 && msg.text) {
-    user.utr = msg.text;
-    user.step = 6;
-    return bot.sendMessage(chatId, '📸 Please upload Payment Screenshot');
+    user.utr = msg.text; user.step = 6;
+    return bot.sendMessage(chatId, '📸 Upload Payment Screenshot');
   }
 });
 
@@ -139,7 +106,7 @@ bot.on('message', async (msg) => {
 ====================== */
 
 async function sendToSheet(user, chatId) {
-  const response = await fetch(SHEET_WEBHOOK_URL, {
+  const res = await fetch(SHEET_WEBHOOK_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -153,12 +120,7 @@ async function sendToSheet(user, chatId) {
     })
   });
 
-  if (!response.ok) {
-    throw new Error(`Sheet HTTP error: ${response.status}`);
-  }
-
-  const text = await response.text();
-  console.log('📄 Sheet response:', text);
+  if (!res.ok) throw new Error('Sheet error');
 }
 
 /* ======================
@@ -174,13 +136,13 @@ bot.on('photo', async (msg) => {
 
   bot.sendPhoto(ADMIN_CHAT_ID, photoId, {
     caption:
-`🧾 *New Payment Submission*
+`🧾 *Payment Submission*
 
-👤 Name: ${user.name}
-📧 Email: ${user.email}
-📞 Phone: ${user.phone}
-📚 Course: ${user.course}
-💳 UTR: ${user.utr}`,
+👤 ${user.name}
+📧 ${user.email}
+📞 ${user.phone}
+📚 ${user.course}
+💳 ${user.utr}`,
     parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
@@ -195,15 +157,11 @@ bot.on('photo', async (msg) => {
     }
   });
 
-  try {
-    await sendToSheet(user, chatId);
-  } catch (err) {
-    console.error('❌ Sheet error:', err.message);
-  }
+  await sendToSheet(user, chatId);
 
   bot.sendMessage(
     chatId,
-    '✅ Payment details received.\nPlease wait for verification.\n\nNeed help?',
+    '✅ Payment received. Please wait for verification.',
     {
       reply_markup: {
         inline_keyboard: [
@@ -212,72 +170,89 @@ bot.on('photo', async (msg) => {
       }
     }
   );
-
-  delete users[chatId];
 });
 
 /* ======================
-   CALLBACK HANDLER
+   CALLBACK HANDLER (STEP-3 CONFIRMED)
 ====================== */
 
 bot.on('callback_query', (query) => {
   const data = query.data;
   const fromId = query.from.id.toString();
 
-  /* 🔹 STUDENT SUPPORT */
+  // Student support
   if (data.startsWith('support_')) {
-    const studentChatId = data.split('_')[1];
-    users[studentChatId] = { step: 'support' };
-
-    bot.sendMessage(
-      studentChatId,
-      '💬 Please type your issue below.\nOur support team will reply soon.'
-    );
-
+    const sid = data.split('_')[1];
+    users[sid] = { step: 'support' };
+    bot.sendMessage(sid, '💬 Type your issue below.');
     return bot.answerCallbackQuery(query.id);
   }
 
-  /* 🔹 ADMIN CHAT INIT */
+  // ✅ ADMIN CHAT INIT (STEP-3 FIXED)
   if (data.startsWith('adminchat_') && fromId === ADMIN_CHAT_ID) {
     const studentChatId = data.split('_')[1];
-    users[studentChatId] = { step: 'admin_chat' };
-
     bot.sendMessage(
       ADMIN_CHAT_ID,
-      `✍️ Type your message below.\nIt will be sent to student (${studentChatId}).`
+      `✍️ Reply to THIS message to chat with student\nStudent ID: ${studentChatId}`
     );
-
     return bot.answerCallbackQuery(query.id);
   }
 
-  /* 🔒 ADMIN ONLY */
   if (fromId !== ADMIN_CHAT_ID) {
-    return bot.answerCallbackQuery(query.id, { text: '❌ Unauthorized' });
+    return bot.answerCallbackQuery(query.id, { text: 'Unauthorized' });
   }
 
   const [action, studentChatId] = data.split('_');
 
   if (action === 'approve') {
-    bot.sendMessage(
-      studentChatId,
-      '🎉 *Payment Approved!*\n\nLogin access will be shared shortly.\nPlease check your registered email ✉️',
-      { parse_mode: 'Markdown' }
-    );
-    return bot.answerCallbackQuery(query.id, { text: '✅ Approved' });
+    bot.sendMessage(studentChatId, '🎉 Payment Approved!');
+    return bot.answerCallbackQuery(query.id, { text: 'Approved' });
   }
 
   if (action === 'reject') {
-    bot.sendMessage(
-      studentChatId,
-      '❌ *Payment Rejected*\n\nPlease contact support or re-upload correct details.',
-      { parse_mode: 'Markdown' }
-    );
-    return bot.answerCallbackQuery(query.id, { text: '❌ Rejected' });
+    bot.sendMessage(studentChatId, '❌ Payment Rejected.');
+    return bot.answerCallbackQuery(query.id, { text: 'Rejected' });
   }
 });
 
 /* ======================
-   WEBHOOK (RENDER)
+   ADMIN → STUDENT (TEXT / PHOTO / PDF)
+====================== */
+
+bot.on('message', async (msg) => {
+  if (
+    msg.chat.id.toString() !== ADMIN_CHAT_ID ||
+    !msg.reply_to_message ||
+    !msg.reply_to_message.text
+  ) return;
+
+  const match = msg.reply_to_message.text.match(/Student ID:\s(\d+)/);
+  if (!match) return;
+
+  const studentChatId = match[1];
+
+  if (msg.text) {
+    await bot.sendMessage(
+      studentChatId,
+      `💬 *Support Message:*\n${msg.text}`,
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  if (msg.photo) {
+    const pid = msg.photo[msg.photo.length - 1].file_id;
+    await bot.sendPhoto(studentChatId, pid, { caption: msg.caption || '📎 From Support' });
+  }
+
+  if (msg.document) {
+    await bot.sendDocument(studentChatId, msg.document.file_id, {
+      caption: msg.caption || '📎 From Support'
+    });
+  }
+});
+
+/* ======================
+   WEBHOOK
 ====================== */
 
 app.post(`/bot${token}`, (req, res) => {
