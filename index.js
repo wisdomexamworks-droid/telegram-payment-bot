@@ -63,7 +63,7 @@ Please *Enter Your Registered User Name* 👇`,
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
 
-  /* 🔹 ADMIN → STUDENT (TEXT / PHOTO / FILE) */
+  /* 🔹 ADMIN → STUDENT (Message Student flow) */
   if (
     chatId.toString() === ADMIN_CHAT_ID &&
     Object.values(users).some(u => u.step === 'admin_message')
@@ -71,45 +71,26 @@ bot.on('message', async (msg) => {
     const entry = Object.entries(users).find(
       ([_, u]) => u.step === 'admin_message'
     );
+
     if (!entry) return;
 
     const [studentChatId] = entry;
 
-    // 📝 TEXT
-    if (msg.text) {
-      await bot.sendMessage(
-        studentChatId,
-        `💬 *Message from Support:*\n${msg.text}`,
-        { parse_mode: 'Markdown' }
-      );
-    }
-
-    // 📸 PHOTO
-    else if (msg.photo) {
-      const photoId = msg.photo[msg.photo.length - 1].file_id;
-      await bot.sendPhoto(studentChatId, photoId, {
-        caption: '💬 *Message from Support:*',
-        parse_mode: 'Markdown'
-      });
-    }
-
-    // 📎 PDF / FILE
-    else if (msg.document) {
-      await bot.sendDocument(studentChatId, msg.document.file_id, {
-        caption: '💬 *Message from Support:*',
-        parse_mode: 'Markdown'
-      });
-    }
+    bot.sendMessage(
+      studentChatId,
+      `💬 *Message from Support:*\n${msg.text}`,
+      { parse_mode: 'Markdown' }
+    );
 
     delete users[studentChatId];
     return;
   }
 
-  /* 🔹 ADMIN → STUDENT (reply based support – text only) */
-  if (chatId.toString() === ADMIN_CHAT_ID && msg.reply_to_message && msg.text) {
+  /* 🔹 ADMIN → STUDENT (reply based support) */
+  if (chatId.toString() === ADMIN_CHAT_ID && msg.reply_to_message) {
     const studentChatId = replyMap[msg.reply_to_message.message_id];
     if (studentChatId) {
-      await bot.sendMessage(
+      bot.sendMessage(
         studentChatId,
         `💬 *Message from Support:*\n${msg.text}`,
         { parse_mode: 'Markdown' }
@@ -132,7 +113,7 @@ bot.on('message', async (msg) => {
 
     replyMap[sent.message_id] = chatId;
 
-    await bot.sendMessage(chatId, '✅ Your message has been sent to support.');
+    bot.sendMessage(chatId, '✅ Your message has been sent to support.');
     delete users[chatId];
     return;
   }
@@ -189,7 +170,7 @@ async function sendToSheet(user, chatId) {
 }
 
 /* ======================
-   PHOTO HANDLER (PAYMENT SCREENSHOT)
+   PHOTO HANDLER
 ====================== */
 
 bot.on('photo', async (msg) => {
@@ -199,7 +180,7 @@ bot.on('photo', async (msg) => {
 
   const photoId = msg.photo[msg.photo.length - 1].file_id;
 
-  await bot.sendPhoto(ADMIN_CHAT_ID, photoId, {
+  bot.sendPhoto(ADMIN_CHAT_ID, photoId, {
     caption:
 `🧾 *New Payment Submission*
 
@@ -224,7 +205,7 @@ bot.on('photo', async (msg) => {
 
   await sendToSheet(user, chatId);
 
-  await bot.sendMessage(
+  bot.sendMessage(
     chatId,
     '✅ Payment details received.\nPlease wait for verification.\n\nNeed help?',
     {
@@ -252,7 +233,7 @@ bot.on('callback_query', async (query) => {
     const studentChatId = data.split('_')[1];
     users[studentChatId] = { step: 'admin_message' };
 
-    await bot.sendMessage(
+    bot.sendMessage(
       ADMIN_CHAT_ID,
       `✍️ Type your message below.\nIt will be sent to student (${studentChatId}).`
     );
@@ -265,7 +246,7 @@ bot.on('callback_query', async (query) => {
     const studentChatId = data.split('_')[1];
     users[studentChatId] = { step: 'support' };
 
-    await bot.sendMessage(
+    bot.sendMessage(
       studentChatId,
       '💬 Please type your issue below.\nOur support team will reply soon.'
     );
@@ -290,7 +271,7 @@ bot.on('callback_query', async (query) => {
     })
   });
 
-  await bot.sendMessage(
+  bot.sendMessage(
     studentChatId,
     action === 'approve'
       ? '🎉 *Payment Approved!*\n\nLogin access will be shared shortly.\nPlease check your registered email ✉️'
