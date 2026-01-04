@@ -11,20 +11,19 @@ const SHEET_WEBHOOK_URL =
 const token = process.env.BOT_TOKEN;
 const ADMIN_CHAT_ID = '779962598';
 
-if (!token) {
-  throw new Error('BOT_TOKEN is not defined');
-}
+if (!token) throw new Error('BOT_TOKEN missing');
+if (typeof fetch !== 'function') throw new Error('Node 18+ required');
 
 /* ======================
    BOT + SERVER
 ====================== */
 
-const bot = new TelegramBot(token);
+const bot = new TelegramBot(token); // webhook
 const app = express();
 app.use(express.json());
 
 /* ======================
-   USER STATE (IMPORTANT)
+   USER STATE
 ====================== */
 
 const users = {};
@@ -39,62 +38,37 @@ bot.onText(/\/start/, (msg) => {
 
   bot.sendMessage(
     chatId,
-`👋 *Wisdom Exam Works – Registration*
+`👋 *Wisdom Exam Works – Payment Verification*
 
-Please enter your *Registered Name* 👇`,
+Your details are secure 🔐  
+Visible only to admin.
+
+➡️ *Enter your Registered Name*`,
     { parse_mode: 'Markdown' }
   );
 });
 
 /* ======================
-   MESSAGE HANDLER
+   USER MESSAGE FLOW
 ====================== */
 
-bot.on('message', (msg) => {
+bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const user = users[chatId];
 
-  /* 🔹 STUDENT → SUPPORT */
+  // STUDENT → SUPPORT
   if (user && user.step === 'support' && msg.text) {
-    bot.sendMessage(
+    await bot.sendMessage(
       ADMIN_CHAT_ID,
-      `📩 *Support Message*\nUser: ${chatId}\n\n${msg.text}`,
+`📩 *Support Message*
+Student ID: ${chatId}
+
+${msg.text}`,
       { parse_mode: 'Markdown' }
     );
 
-    bot.sendMessage(chatId, '✅ Message sent to support.');
+    await bot.sendMessage(chatId, '✅ Message sent to support');
     delete users[chatId];
-    return;
-  }
-
-  /* 🔹 ADMIN → STUDENT (TEXT / PHOTO / PDF) */
-  if (
-    msg.chat.id.toString() === ADMIN_CHAT_ID &&
-    Object.values(users).some(u => u.step === 'admin_chat')
-  ) {
-    const entry = Object.entries(users).find(
-      ([_, u]) => u.step === 'admin_chat'
-    );
-    if (!entry) return;
-
-    const [studentChatId] = entry;
-
-    if (msg.text) {
-      bot.sendMessage(studentChatId, msg.text);
-    }
-
-    if (msg.photo) {
-      const photoId = msg.photo[msg.photo.length - 1].file_id;
-      bot.sendPhoto(studentChatId, photoId, { caption: msg.caption || '' });
-    }
-
-    if (msg.document) {
-      bot.sendDocument(studentChatId, msg.document.file_id, {
-        caption: msg.caption || ''
-      });
-    }
-
-    delete users[studentChatId];
     return;
   }
 
@@ -103,25 +77,25 @@ bot.on('message', (msg) => {
   if (user.step === 1 && msg.text) {
     user.name = msg.text;
     user.step = 2;
-    return bot.sendMessage(chatId, '📧 Enter Email ID:');
+    return bot.sendMessage(chatId, '📧 Enter Email ID');
   }
 
   if (user.step === 2 && msg.text) {
     user.email = msg.text;
     user.step = 3;
-    return bot.sendMessage(chatId, '📞 Enter Phone Number:');
+    return bot.sendMessage(chatId, '📞 Enter Phone Number');
   }
 
   if (user.step === 3 && msg.text) {
     user.phone = msg.text;
     user.step = 4;
-    return bot.sendMessage(chatId, '📚 Enter Course Name:');
+    return bot.sendMessage(chatId, '📚 Enter Course Name');
   }
 
   if (user.step === 4 && msg.text) {
     user.course = msg.text;
     user.step = 5;
-    return bot.sendMessage(chatId, '💳 Enter UTR Number:');
+    return bot.sendMessage(chatId, '💳 Enter UPI / Transaction ID');
   }
 
   if (user.step === 5 && msg.text) {
@@ -132,7 +106,7 @@ bot.on('message', (msg) => {
 });
 
 /* ======================
-   SEND TO GOOGLE SHEET
+   GOOGLE SHEET
 ====================== */
 
 async function sendToSheet(user, chatId) {
@@ -160,36 +134,41 @@ bot.on('photo', async (msg) => {
   const user = users[chatId];
   if (!user || user.step !== 6) return;
 
-  const photoId = msg.photo[msg.photo.length - 1].file_id;
+  const photoId = msg.photo.at(-1).file_id;
 
-  bot.sendPhoto(ADMIN_CHAT_ID, photoId, {
+  // SEND TO ADMIN
+  await bot.sendPhoto(ADMIN_CHAT_ID, photoId, {
     caption:
-`🧾 *Payment Received*
-
+`🧾 *Payment Submission*
 👤 ${user.name}
 📧 ${user.email}
 📞 ${user.phone}
 📚 ${user.course}
-💳 ${user.utr}`,
+💳 ${user.utr}
+
+Student ID: ${chatId}`,
     parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
         [
           { text: '✅ Approve', callback_data: `approve_${chatId}` },
           { text: '❌ Reject', callback_data: `reject_${chatId}` }
-        ],
-        [
-          { text: '💬 Message Student', callback_data: `adminchat_${chatId}` }
         ]
       ]
     }
   });
 
+  // ADMIN CHAT ENTRY MESSAGE
+  await bot.sendMessage(
+    ADMIN_CHAT_ID,
+    `✍️ Reply to THIS message to chat with student\nStudent ID: ${chatId}`
+  );
+
   await sendToSheet(user, chatId);
 
-  bot.sendMessage(
+  await bot.sendMessage(
     chatId,
-    '✅ Payment received.\nPlease wait for verification.',
+    '✅ Payment received. Please wait for verification.',
     {
       reply_markup: {
         inline_keyboard: [
@@ -199,33 +178,22 @@ bot.on('photo', async (msg) => {
     }
   );
 
-  /* ❌ DO NOT DELETE user here – VERY IMPORTANT */
+  delete users[chatId];
 });
 
 /* ======================
-   CALLBACK HANDLER
+   CALLBACKS
 ====================== */
 
-bot.on('callback_query', (query) => {
+bot.on('callback_query', async (query) => {
   const data = query.data;
   const fromId = query.from.id.toString();
 
+  // STUDENT SUPPORT
   if (data.startsWith('support_')) {
-    const studentChatId = data.split('_')[1];
-    users[studentChatId] = { step: 'support' };
-
-    bot.sendMessage(studentChatId, '💬 Type your issue below.');
-    return bot.answerCallbackQuery(query.id);
-  }
-
-  if (data.startsWith('adminchat_') && fromId === ADMIN_CHAT_ID) {
-    const studentChatId = data.split('_')[1];
-    users[studentChatId] = { step: 'admin_chat' };
-
-    bot.sendMessage(
-      ADMIN_CHAT_ID,
-      `✍️ Send message / photo / PDF now.\nStudent ID: ${studentChatId}`
-    );
+    const studentId = data.split('_')[1];
+    users[studentId] = { step: 'support' };
+    await bot.sendMessage(studentId, '✍️ Type your issue');
     return bot.answerCallbackQuery(query.id);
   }
 
@@ -233,16 +201,59 @@ bot.on('callback_query', (query) => {
     return bot.answerCallbackQuery(query.id, { text: 'Unauthorized' });
   }
 
-  const [action, studentChatId] = data.split('_');
+  const [action, studentId] = data.split('_');
 
   if (action === 'approve') {
-    bot.sendMessage(studentChatId, '🎉 Payment Approved!');
-    return bot.answerCallbackQuery(query.id);
+    await bot.sendMessage(
+      studentId,
+      '🎉 *Payment Approved*\nLogin access will be shared shortly',
+      { parse_mode: 'Markdown' }
+    );
   }
 
   if (action === 'reject') {
-    bot.sendMessage(studentChatId, '❌ Payment Rejected.');
-    return bot.answerCallbackQuery(query.id);
+    await bot.sendMessage(
+      studentId,
+      '❌ *Payment Rejected*\nPlease contact support',
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  bot.answerCallbackQuery(query.id);
+});
+
+/* ======================
+   ADMIN → STUDENT (TEXT / PHOTO / PDF)
+====================== */
+
+bot.on('message', async (msg) => {
+  if (msg.chat.id.toString() !== ADMIN_CHAT_ID) return;
+  if (!msg.reply_to_message?.text) return;
+
+  const match = msg.reply_to_message.text.match(/Student ID:\s*(\d+)/);
+  if (!match) return;
+
+  const studentId = match[1];
+
+  try {
+    if (msg.text) {
+      await bot.sendMessage(studentId, `💬 ${msg.text}`);
+    }
+
+    if (msg.photo) {
+      const photoId = msg.photo.at(-1).file_id;
+      await bot.sendPhoto(studentId, photoId, { caption: msg.caption || '' });
+    }
+
+    if (msg.document) {
+      await bot.sendDocument(studentId, msg.document.file_id, {
+        caption: msg.caption || ''
+      });
+    }
+
+    await bot.sendMessage(ADMIN_CHAT_ID, `✅ Sent to ${studentId}`);
+  } catch (e) {
+    await bot.sendMessage(ADMIN_CHAT_ID, '❌ Failed to send');
   }
 });
 
@@ -256,10 +267,9 @@ app.post(`/bot${token}`, (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-
 app.listen(PORT, async () => {
   await bot.setWebHook(
     `https://telegram-payment-bot-3vk9.onrender.com/bot${token}`
   );
-  console.log('🚀 Bot Live');
+  console.log('🚀 Bot live');
 });
