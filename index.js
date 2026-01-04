@@ -1,6 +1,9 @@
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 
+// 🔥 RENDER / PRODUCTION SAFE FETCH
+const fetch = (...args) =>
+  import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 /* ======================
    CONFIG
@@ -29,7 +32,7 @@ app.use(express.json());
 ====================== */
 
 const users = {};
-const replyMap = {}; // 🔥 FIX 2: admin reply mapping
+const replyMap = {};
 
 /* ======================
    START COMMAND
@@ -60,7 +63,30 @@ Please *Enter Your Registered User Name* 👇`,
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
 
-  /* 🔹 ADMIN → STUDENT (reply based – FIXED) */
+  /* 🔹 ADMIN → STUDENT (Message Student flow) */
+  if (
+    chatId.toString() === ADMIN_CHAT_ID &&
+    Object.values(users).some(u => u.step === 'admin_message')
+  ) {
+    const entry = Object.entries(users).find(
+      ([_, u]) => u.step === 'admin_message'
+    );
+
+    if (!entry) return;
+
+    const [studentChatId] = entry;
+
+    bot.sendMessage(
+      studentChatId,
+      `💬 *Message from Support:*\n${msg.text}`,
+      { parse_mode: 'Markdown' }
+    );
+
+    delete users[studentChatId];
+    return;
+  }
+
+  /* 🔹 ADMIN → STUDENT (reply based support) */
   if (chatId.toString() === ADMIN_CHAT_ID && msg.reply_to_message) {
     const studentChatId = replyMap[msg.reply_to_message.message_id];
     if (studentChatId) {
@@ -191,7 +217,6 @@ bot.on('photo', async (msg) => {
     }
   );
 
-  // 🔴 FIX 3: delete pannala (support / approve venum)
   user.step = 'submitted';
 });
 
@@ -203,8 +228,21 @@ bot.on('callback_query', async (query) => {
   const data = query.data;
   const fromId = query.from.id.toString();
 
-  /* 🔹 STUDENT SUPPORT */
-  if (data.startsWith('support_')) {
+  /* 🔹 ADMIN CLICKED "Message Student" */
+  if (data.startsWith('support_') && fromId === ADMIN_CHAT_ID) {
+    const studentChatId = data.split('_')[1];
+    users[studentChatId] = { step: 'admin_message' };
+
+    bot.sendMessage(
+      ADMIN_CHAT_ID,
+      `✍️ Type your message below.\nIt will be sent to student (${studentChatId}).`
+    );
+
+    return bot.answerCallbackQuery(query.id);
+  }
+
+  /* 🔹 STUDENT CLICKED "Contact Support" */
+  if (data.startsWith('support_') && fromId !== ADMIN_CHAT_ID) {
     const studentChatId = data.split('_')[1];
     users[studentChatId] = { step: 'support' };
 
@@ -223,43 +261,25 @@ bot.on('callback_query', async (query) => {
 
   const [action, studentChatId, utr] = data.split('_');
 
-  if (action === 'approve') {
-    await fetch(SHEET_WEBHOOK_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'update_status',
-        utr,
-        status: 'Approved'
-      })
-    });
+  await fetch(SHEET_WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'update_status',
+      utr,
+      status: action === 'approve' ? 'Approved' : 'Rejected'
+    })
+  });
 
-    bot.sendMessage(
-      studentChatId,
-      '🎉 *Payment Approved!*\n\nLogin access will be shared shortly.\nPlease check your registered email ✉️',
-      { parse_mode: 'Markdown' }
-    );
-    return bot.answerCallbackQuery(query.id, { text: '✅ Approved' });
-  }
+  bot.sendMessage(
+    studentChatId,
+    action === 'approve'
+      ? '🎉 *Payment Approved!*\n\nLogin access will be shared shortly.\nPlease check your registered email ✉️'
+      : '❌ *Payment Rejected*\n\nPlease contact support or re-upload correct details.',
+    { parse_mode: 'Markdown' }
+  );
 
-  if (action === 'reject') {
-    await fetch(SHEET_WEBHOOK_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'update_status',
-        utr,
-        status: 'Rejected'
-      })
-    });
-
-    bot.sendMessage(
-      studentChatId,
-      '❌ *Payment Rejected*\n\nPlease contact support or re-upload correct details.',
-      { parse_mode: 'Markdown' }
-    );
-    return bot.answerCallbackQuery(query.id, { text: '❌ Rejected' });
-  }
+  bot.answerCallbackQuery(query.id);
 });
 
 /* ======================
