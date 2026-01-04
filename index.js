@@ -69,27 +69,49 @@ bot.on('message', async (msg) => {
   }
 
   /* 🔹 ADMIN → STUDENT (Message Student flow – TEXT / IMAGE / FILE) */
-  if (
-    chatId.toString() === ADMIN_CHAT_ID &&
-    Object.values(users).some(u => u.step === 'admin_message')
-  ) {
-    const entry = Object.entries(users).find(
-      ([_, u]) => u.step === 'admin_message'
-    );
+  /* 🔹 ADMIN → STUDENT (Message Student flow – TEXT / IMAGE / FILE) */
+if (
+  chatId.toString() === ADMIN_CHAT_ID &&
+  Object.values(users).some(u => u.step === 'admin_message')
+) {
+  const entry = Object.entries(users).find(
+    ([_, u]) => u.step === 'admin_message'
+  );
 
-    if (!entry) return;
+  if (!entry) return;
 
-    const [studentChatId] = entry;
+  const [studentChatId] = entry;
 
+  // 📝 TEXT
+  if (msg.text) {
     await bot.sendMessage(
       studentChatId,
       `💬 *Message from Support:*\n${msg.text}`,
       { parse_mode: 'Markdown' }
     );
-
-    delete users[studentChatId];
-    return;
   }
+
+  // 📸 IMAGE
+  else if (msg.photo) {
+    const photoId = msg.photo[msg.photo.length - 1].file_id;
+    await bot.sendPhoto(studentChatId, photoId, {
+      caption: '💬 *Message from Support:*',
+      parse_mode: 'Markdown'
+    });
+  }
+
+  // 📎 FILE / DOCUMENT
+  else if (msg.document) {
+    await bot.sendDocument(studentChatId, msg.document.file_id, {
+      caption: '💬 *Message from Support:*',
+      parse_mode: 'Markdown'
+    });
+  }
+
+  delete users[studentChatId];
+  return;
+}
+
 
   /* 🔹 ADMIN → STUDENT (reply based support) */
   if (chatId.toString() === ADMIN_CHAT_ID && msg.reply_to_message) {
