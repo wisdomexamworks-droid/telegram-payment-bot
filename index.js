@@ -1,10 +1,6 @@
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 
-// 🔥 RENDER / PRODUCTION SAFE FETCH
-const fetch = (...args) =>
-  import('node-fetch').then(({ default: fetch }) => fetch(...args));
-
 /* ======================
    CONFIG
 ====================== */
@@ -19,11 +15,15 @@ if (!token) {
   throw new Error('BOT_TOKEN is not defined in environment variables');
 }
 
+if (typeof fetch !== 'function') {
+  throw new Error('Global fetch not available. Node 18+ required.');
+}
+
 /* ======================
    BOT + SERVER
 ====================== */
 
-const bot = new TelegramBot(token);
+const bot = new TelegramBot(token); // webhook mode
 const app = express();
 app.use(express.json());
 
@@ -32,7 +32,6 @@ app.use(express.json());
 ====================== */
 
 const users = {};
-const replyMap = {};
 
 /* ======================
    START COMMAND
@@ -62,14 +61,30 @@ Please *Enter Your Registered User Name* 👇`,
 
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
+  const user = users[chatId];
 
-  /* 🔹 ADMIN → STUDENT (Message Student flow) */
+  /* 🔹 STUDENT → SUPPORT */
+  if (user && user.step === 'support' && msg.text) {
+    bot.sendMessage(
+      ADMIN_CHAT_ID,
+      `📩 *New Support Message*\n\n👤 User ID: ${chatId}\n💬 Message:\n${msg.text}`,
+      { parse_mode: 'Markdown' }
+    );
+
+    bot.sendMessage(chatId, '✅ Your message has been sent to support.');
+    delete users[chatId];
+    return;
+  }
+
+  /* 🔹 ADMIN → STUDENT (REPLY-BASED, SAFE) */
   if (
-    chatId.toString() === ADMIN_CHAT_ID &&
-    Object.values(users).some(u => u.step === 'admin_message')
+    msg.chat.id.toString() === ADMIN_CHAT_ID &&
+    msg.reply_to_message &&
+    msg.reply_to_message.text &&
+    msg.reply_to_message.text.includes('Type your message below')
   ) {
     const entry = Object.entries(users).find(
-      ([_, u]) => u.step === 'admin_message'
+      ([_, u]) => u.step === 'admin_chat'
     );
 
     if (!entry) return;
@@ -86,37 +101,7 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  /* 🔹 ADMIN → STUDENT (reply based support) */
-  if (chatId.toString() === ADMIN_CHAT_ID && msg.reply_to_message) {
-    const studentChatId = replyMap[msg.reply_to_message.message_id];
-    if (studentChatId) {
-      bot.sendMessage(
-        studentChatId,
-        `💬 *Message from Support:*\n${msg.text}`,
-        { parse_mode: 'Markdown' }
-      );
-      delete replyMap[msg.reply_to_message.message_id];
-    }
-    return;
-  }
-
-  const user = users[chatId];
   if (!user) return;
-
-  /* 🔹 STUDENT → SUPPORT */
-  if (user.step === 'support' && msg.text) {
-    const sent = await bot.sendMessage(
-      ADMIN_CHAT_ID,
-      `📩 *New Support Message*\n\n👤 User ID: ${chatId}\n💬 Message:\n${msg.text}`,
-      { parse_mode: 'Markdown' }
-    );
-
-    replyMap[sent.message_id] = chatId;
-
-    bot.sendMessage(chatId, '✅ Your message has been sent to support.');
-    delete users[chatId];
-    return;
-  }
 
   if (user.step === 1 && msg.text) {
     user.name = msg.text;
@@ -154,7 +139,7 @@ bot.on('message', async (msg) => {
 ====================== */
 
 async function sendToSheet(user, chatId) {
-  await fetch(SHEET_WEBHOOK_URL, {
+  const response = await fetch(SHEET_WEBHOOK_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -167,6 +152,13 @@ async function sendToSheet(user, chatId) {
       status: 'Pending'
     })
   });
+
+  if (!response.ok) {
+    throw new Error(`Sheet HTTP error: ${response.status}`);
+  }
+
+  const text = await response.text();
+  console.log('📄 Sheet response:', text);
 }
 
 /* ======================
@@ -193,17 +185,21 @@ bot.on('photo', async (msg) => {
     reply_markup: {
       inline_keyboard: [
         [
-          { text: '✅ Approve', callback_data: `approve_${chatId}_${user.utr}` },
-          { text: '❌ Reject', callback_data: `reject_${chatId}_${user.utr}` }
+          { text: '✅ Approve', callback_data: `approve_${chatId}` },
+          { text: '❌ Reject', callback_data: `reject_${chatId}` }
         ],
         [
-          { text: '💬 Message Student', callback_data: `support_${chatId}` }
+          { text: '💬 Message Student', callback_data: `adminchat_${chatId}` }
         ]
       ]
     }
   });
 
-  await sendToSheet(user, chatId);
+  try {
+    await sendToSheet(user, chatId);
+  } catch (err) {
+    console.error('❌ Sheet error:', err.message);
+  }
 
   bot.sendMessage(
     chatId,
@@ -217,32 +213,19 @@ bot.on('photo', async (msg) => {
     }
   );
 
-  user.step = 'submitted';
+  delete users[chatId];
 });
 
 /* ======================
    CALLBACK HANDLER
 ====================== */
 
-bot.on('callback_query', async (query) => {
+bot.on('callback_query', (query) => {
   const data = query.data;
   const fromId = query.from.id.toString();
 
-  /* 🔹 ADMIN CLICKED "Message Student" */
-  if (data.startsWith('support_') && fromId === ADMIN_CHAT_ID) {
-    const studentChatId = data.split('_')[1];
-    users[studentChatId] = { step: 'admin_message' };
-
-    bot.sendMessage(
-      ADMIN_CHAT_ID,
-      `✍️ Type your message below.\nIt will be sent to student (${studentChatId}).`
-    );
-
-    return bot.answerCallbackQuery(query.id);
-  }
-
-  /* 🔹 STUDENT CLICKED "Contact Support" */
-  if (data.startsWith('support_') && fromId !== ADMIN_CHAT_ID) {
+  /* 🔹 STUDENT SUPPORT */
+  if (data.startsWith('support_')) {
     const studentChatId = data.split('_')[1];
     users[studentChatId] = { step: 'support' };
 
@@ -254,32 +237,43 @@ bot.on('callback_query', async (query) => {
     return bot.answerCallbackQuery(query.id);
   }
 
+  /* 🔹 ADMIN CHAT INIT */
+  if (data.startsWith('adminchat_') && fromId === ADMIN_CHAT_ID) {
+    const studentChatId = data.split('_')[1];
+    users[studentChatId] = { step: 'admin_chat' };
+
+    bot.sendMessage(
+      ADMIN_CHAT_ID,
+      `✍️ Type your message below.\nIt will be sent to student (${studentChatId}).`
+    );
+
+    return bot.answerCallbackQuery(query.id);
+  }
+
   /* 🔒 ADMIN ONLY */
   if (fromId !== ADMIN_CHAT_ID) {
     return bot.answerCallbackQuery(query.id, { text: '❌ Unauthorized' });
   }
 
-  const [action, studentChatId, utr] = data.split('_');
+  const [action, studentChatId] = data.split('_');
 
-  await fetch(SHEET_WEBHOOK_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      action: 'update_status',
-      utr,
-      status: action === 'approve' ? 'Approved' : 'Rejected'
-    })
-  });
+  if (action === 'approve') {
+    bot.sendMessage(
+      studentChatId,
+      '🎉 *Payment Approved!*\n\nLogin access will be shared shortly.\nPlease check your registered email ✉️',
+      { parse_mode: 'Markdown' }
+    );
+    return bot.answerCallbackQuery(query.id, { text: '✅ Approved' });
+  }
 
-  bot.sendMessage(
-    studentChatId,
-    action === 'approve'
-      ? '🎉 *Payment Approved!*\n\nLogin access will be shared shortly.\nPlease check your registered email ✉️'
-      : '❌ *Payment Rejected*\n\nPlease contact support or re-upload correct details.',
-    { parse_mode: 'Markdown' }
-  );
-
-  bot.answerCallbackQuery(query.id);
+  if (action === 'reject') {
+    bot.sendMessage(
+      studentChatId,
+      '❌ *Payment Rejected*\n\nPlease contact support or re-upload correct details.',
+      { parse_mode: 'Markdown' }
+    );
+    return bot.answerCallbackQuery(query.id, { text: '❌ Rejected' });
+  }
 });
 
 /* ======================
