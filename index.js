@@ -1,6 +1,10 @@
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 
+// 🔴 FIX 1: Render fetch issue
+const fetch = (...args) =>
+  import('node-fetch').then(({ default: fetch }) => fetch(...args));
+
 /* ======================
    CONFIG
 ====================== */
@@ -15,15 +19,11 @@ if (!token) {
   throw new Error('BOT_TOKEN is not defined in environment variables');
 }
 
-if (typeof fetch !== 'function') {
-  throw new Error('Global fetch not available. Node 18+ required.');
-}
-
 /* ======================
    BOT + SERVER
 ====================== */
 
-const bot = new TelegramBot(token); // webhook mode
+const bot = new TelegramBot(token);
 const app = express();
 app.use(express.json());
 
@@ -32,6 +32,7 @@ app.use(express.json());
 ====================== */
 
 const users = {};
+const replyMap = {}; // 🔥 FIX 2: admin reply mapping
 
 /* ======================
    START COMMAND
@@ -61,47 +62,38 @@ Please *Enter Your Registered User Name* 👇`,
 
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
+
+  /* 🔹 ADMIN → STUDENT (reply based – FIXED) */
+  if (chatId.toString() === ADMIN_CHAT_ID && msg.reply_to_message) {
+    const studentChatId = replyMap[msg.reply_to_message.message_id];
+    if (studentChatId) {
+      bot.sendMessage(
+        studentChatId,
+        `💬 *Message from Support:*\n${msg.text}`,
+        { parse_mode: 'Markdown' }
+      );
+      delete replyMap[msg.reply_to_message.message_id];
+    }
+    return;
+  }
+
   const user = users[chatId];
+  if (!user) return;
 
   /* 🔹 STUDENT → SUPPORT */
-  if (user && user.step === 'support' && msg.text) {
-    bot.sendMessage(
+  if (user.step === 'support' && msg.text) {
+    const sent = await bot.sendMessage(
       ADMIN_CHAT_ID,
       `📩 *New Support Message*\n\n👤 User ID: ${chatId}\n💬 Message:\n${msg.text}`,
       { parse_mode: 'Markdown' }
     );
 
+    replyMap[sent.message_id] = chatId;
+
     bot.sendMessage(chatId, '✅ Your message has been sent to support.');
     delete users[chatId];
     return;
   }
-
-  /* 🔹 ADMIN → STUDENT (REPLY-BASED, SAFE) */
-  if (
-    msg.chat.id.toString() === ADMIN_CHAT_ID &&
-    msg.reply_to_message &&
-    msg.reply_to_message.text &&
-    msg.reply_to_message.text.includes('Type your message below')
-  ) {
-    const entry = Object.entries(users).find(
-      ([_, u]) => u.step === 'admin_chat'
-    );
-
-    if (!entry) return;
-
-    const [studentChatId] = entry;
-
-    bot.sendMessage(
-      studentChatId,
-      `💬 *Message from Support:*\n${msg.text}`,
-      { parse_mode: 'Markdown' }
-    );
-
-    delete users[studentChatId];
-    return;
-  }
-
-  if (!user) return;
 
   if (user.step === 1 && msg.text) {
     user.name = msg.text;
@@ -139,7 +131,7 @@ bot.on('message', async (msg) => {
 ====================== */
 
 async function sendToSheet(user, chatId) {
-  const response = await fetch(SHEET_WEBHOOK_URL, {
+  await fetch(SHEET_WEBHOOK_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -152,13 +144,6 @@ async function sendToSheet(user, chatId) {
       status: 'Pending'
     })
   });
-
-  if (!response.ok) {
-    throw new Error(`Sheet HTTP error: ${response.status}`);
-  }
-
-  const text = await response.text();
-  console.log('📄 Sheet response:', text);
 }
 
 /* ======================
@@ -185,21 +170,17 @@ bot.on('photo', async (msg) => {
     reply_markup: {
       inline_keyboard: [
         [
-          { text: '✅ Approve', callback_data: `approve_${chatId}` },
-          { text: '❌ Reject', callback_data: `reject_${chatId}` }
+          { text: '✅ Approve', callback_data: `approve_${chatId}_${user.utr}` },
+          { text: '❌ Reject', callback_data: `reject_${chatId}_${user.utr}` }
         ],
         [
-          { text: '💬 Message Student', callback_data: `adminchat_${chatId}` }
+          { text: '💬 Message Student', callback_data: `support_${chatId}` }
         ]
       ]
     }
   });
 
-  try {
-    await sendToSheet(user, chatId);
-  } catch (err) {
-    console.error('❌ Sheet error:', err.message);
-  }
+  await sendToSheet(user, chatId);
 
   bot.sendMessage(
     chatId,
@@ -213,14 +194,15 @@ bot.on('photo', async (msg) => {
     }
   );
 
-  delete users[chatId];
+  // 🔴 FIX 3: delete pannala (support / approve venum)
+  user.step = 'submitted';
 });
 
 /* ======================
    CALLBACK HANDLER
 ====================== */
 
-bot.on('callback_query', (query) => {
+bot.on('callback_query', async (query) => {
   const data = query.data;
   const fromId = query.from.id.toString();
 
@@ -237,27 +219,24 @@ bot.on('callback_query', (query) => {
     return bot.answerCallbackQuery(query.id);
   }
 
-  /* 🔹 ADMIN CHAT INIT */
-  if (data.startsWith('adminchat_') && fromId === ADMIN_CHAT_ID) {
-    const studentChatId = data.split('_')[1];
-    users[studentChatId] = { step: 'admin_chat' };
-
-    bot.sendMessage(
-      ADMIN_CHAT_ID,
-      `✍️ Type your message below.\nIt will be sent to student (${studentChatId}).`
-    );
-
-    return bot.answerCallbackQuery(query.id);
-  }
-
   /* 🔒 ADMIN ONLY */
   if (fromId !== ADMIN_CHAT_ID) {
     return bot.answerCallbackQuery(query.id, { text: '❌ Unauthorized' });
   }
 
-  const [action, studentChatId] = data.split('_');
+  const [action, studentChatId, utr] = data.split('_');
 
   if (action === 'approve') {
+    await fetch(SHEET_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'update_status',
+        utr,
+        status: 'Approved'
+      })
+    });
+
     bot.sendMessage(
       studentChatId,
       '🎉 *Payment Approved!*\n\nLogin access will be shared shortly.\nPlease check your registered email ✉️',
@@ -267,6 +246,16 @@ bot.on('callback_query', (query) => {
   }
 
   if (action === 'reject') {
+    await fetch(SHEET_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'update_status',
+        utr,
+        status: 'Rejected'
+      })
+    });
+
     bot.sendMessage(
       studentChatId,
       '❌ *Payment Rejected*\n\nPlease contact support or re-upload correct details.',
