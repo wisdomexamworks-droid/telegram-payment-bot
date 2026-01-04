@@ -1,9 +1,6 @@
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 
-// 🔴 FIX 1: Render fetch issue
-const fetch = (...args) =>
-  import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 /* ======================
    CONFIG
