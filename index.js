@@ -21,7 +21,7 @@ app.use(express.json());
 /* ================= MEMORY ================= */
 
 const users = {};
-let adminCurrentStudent = null; // 🔥 KEY FIX
+let adminCurrentStudent = null;
 
 /* ================= START ================= */
 
@@ -31,7 +31,20 @@ bot.onText(/\/start/, (msg) => {
 
   bot.sendMessage(
     chatId,
-    '👋 Welcome\n\nEnter your *Registered Name*',
+`👋 Welcome to Wisdom Exam Works Mentorship 👋
+
+Thank you for registering through our website.
+
+To complete your submission, please share:
+• Full Name
+• Email ID
+• Phone Number
+• Payment Screenshot
+
+🔒 Privacy Assurance:
+Your details are confidential and visible only to our verification team.
+
+✍️ Enter your *Registered Name*`,
     { parse_mode: 'Markdown' }
   );
 });
@@ -62,11 +75,11 @@ bot.on('message', async (msg) => {
 
   /* 🔵 STUDENT SUPPORT */
   if (user && user.step === 'support' && msg.text) {
-    bot.sendMessage(
+    await bot.sendMessage(
       ADMIN_CHAT_ID,
       `📩 Support Message\nUser: ${chatId}\n\n${msg.text}`
     );
-    bot.sendMessage(chatId, '✅ Message sent to support');
+    await bot.sendMessage(chatId, '✅ Message sent to support');
     delete users[chatId];
     return;
   }
@@ -74,24 +87,33 @@ bot.on('message', async (msg) => {
   if (!user) return;
 
   if (user.step === 1 && msg.text) {
-    user.name = msg.text; user.step = 2;
-    return bot.sendMessage(chatId, '📧 Email ID');
+    user.name = msg.text;
+    user.step = 2;
+    return bot.sendMessage(chatId, '📧 Enter your Registered Email ID');
   }
+
   if (user.step === 2 && msg.text) {
-    user.email = msg.text; user.step = 3;
-    return bot.sendMessage(chatId, '📞 Phone');
+    user.email = msg.text;
+    user.step = 3;
+    return bot.sendMessage(chatId, '📞 Enter your Phone Number');
   }
+
   if (user.step === 3 && msg.text) {
-    user.phone = msg.text; user.step = 4;
-    return bot.sendMessage(chatId, '📚 Course');
+    user.phone = msg.text;
+    user.step = 4;
+    return bot.sendMessage(chatId, '📚 Course Registered – Part Time / Full Time');
   }
+
   if (user.step === 4 && msg.text) {
-    user.course = msg.text; user.step = 5;
-    return bot.sendMessage(chatId, '💳 UTR');
+    user.course = msg.text;
+    user.step = 5;
+    return bot.sendMessage(chatId, '💳 UTR / Transaction Number (NOT UPI ID)');
   }
+
   if (user.step === 5 && msg.text) {
-    user.utr = msg.text; user.step = 6;
-    return bot.sendMessage(chatId, '📸 Upload payment screenshot');
+    user.utr = msg.text;
+    user.step = 6;
+    return bot.sendMessage(chatId, '📸 Upload your *Payment Screenshot*');
   }
 });
 
@@ -137,11 +159,12 @@ bot.on('photo', async (msg) => {
   await bot.sendPhoto(ADMIN_CHAT_ID, photoId, {
     caption:
 `🧾 Payment Submission
-Name: ${user.name}
-Email: ${user.email}
-Phone: ${user.phone}
-Course: ${user.course}
-UTR: ${user.utr}`,
+
+👤 Name: ${user.name}
+📧 Email: ${user.email}
+📞 Phone: ${user.phone}
+📚 Course: ${user.course}
+💳 UTR: ${user.utr}`,
     reply_markup: {
       inline_keyboard: [
         [
@@ -157,11 +180,11 @@ UTR: ${user.utr}`,
 
   await sendToSheet(user, chatId);
 
-  bot.sendMessage(chatId, '✅ Payment received. Wait for verification.');
+  await bot.sendMessage(chatId, '✅ Payment received. Please wait for verification.');
   delete users[chatId];
 });
 
-/* ================= CALLBACK ================= */
+/* ================= CALLBACK HANDLER ================= */
 
 bot.on('callback_query', async (q) => {
   const data = q.data;
@@ -169,9 +192,9 @@ bot.on('callback_query', async (q) => {
 
   if (data.startsWith('msg_') && fromId === ADMIN_CHAT_ID) {
     adminCurrentStudent = data.split('_')[1];
-    bot.sendMessage(
+    await bot.sendMessage(
       ADMIN_CHAT_ID,
-      `✍️ Now messaging student: ${adminCurrentStudent}\nSend text / photo / PDF`
+      `✍️ Now chatting with student: ${adminCurrentStudent}`
     );
     return bot.answerCallbackQuery(q.id);
   }
@@ -182,12 +205,12 @@ bot.on('callback_query', async (q) => {
 
   if (action === 'approve') {
     await updateStatus(id, 'Approved');
-    bot.sendMessage(id, '🎉 Payment Approved');
+    await bot.sendMessage(id, '🎉 Your payment has been *Approved*', { parse_mode: 'Markdown' });
   }
 
   if (action === 'reject') {
     await updateStatus(id, 'Rejected');
-    bot.sendMessage(id, '❌ Payment Rejected');
+    await bot.sendMessage(id, '❌ Your payment has been *Rejected*', { parse_mode: 'Markdown' });
   }
 });
 
@@ -203,4 +226,5 @@ app.listen(PORT, async () => {
   await bot.setWebHook(
     `https://telegram-payment-bot-3vk9.onrender.com/bot${token}`
   );
+  console.log('✅ Bot running with webhook');
 });
