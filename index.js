@@ -35,11 +35,7 @@ bot.onText(/\/start/, (msg) => {
 
 Thank you for registering through our website.
 
-To complete your submission, please share:
-• Full Name
-• Email ID
-• Phone Number
-• Payment Screenshot
+To complete your submission, please share the deatils as mentioned in bracket:
 
 🔒 Privacy Assurance:
 Your details are confidential and visible only to our verification team.
@@ -95,13 +91,13 @@ bot.on('message', async (msg) => {
   if (user.step === 2 && msg.text) {
     user.email = msg.text;
     user.step = 3;
-    return bot.sendMessage(chatId, '📞 Enter your Phone Number');
+    return bot.sendMessage(chatId, '📞 Enter your Telegram Number');
   }
 
   if (user.step === 3 && msg.text) {
     user.phone = msg.text;
     user.step = 4;
-    return bot.sendMessage(chatId, '📚 Course Registered – Part Time / Full Time');
+    return bot.sendMessage(chatId, '📚 Course Registered – (Type - Part Time / Full Time) ');
   }
 
   if (user.step === 4 && msg.text) {
