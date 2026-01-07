@@ -35,13 +35,28 @@ bot.onText(/\/start/, (msg) => {
 
 Thank you for registering through our website.
 
-To complete your submission, please share the deatils as mentioned in bracket:
+To complete your submission, please share the details as mentioned.
 
 🔒 Privacy Assurance:
 Your details are confidential and visible only to our verification team.
 
 ✍️ Enter your *Registered Name*`,
     { parse_mode: 'Markdown' }
+  );
+});
+
+/* ================= SUPPORT COMMAND ================= */
+
+bot.onText(/\/support/, (msg) => {
+  const chatId = msg.chat.id;
+  users[chatId] = { step: 'support' };
+
+  bot.sendMessage(
+    chatId,
+`🆘 Support Mode Activated
+
+✍️ Please type your issue clearly.
+Our team will respond shortly.`
   );
 });
 
@@ -53,6 +68,12 @@ bot.on('message', async (msg) => {
 
   /* 🔴 ADMIN → STUDENT DIRECT MESSAGE */
   if (chatId.toString() === ADMIN_CHAT_ID && adminCurrentStudent) {
+
+    if (msg.text === '/end') {
+      adminCurrentStudent = null;
+      return bot.sendMessage(ADMIN_CHAT_ID, '✅ Support chat ended');
+    }
+
     if (msg.text) {
       await bot.sendMessage(adminCurrentStudent, msg.text);
     } else if (msg.photo) {
@@ -69,18 +90,31 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  /* 🔵 STUDENT SUPPORT */
+  /* 🔵 STUDENT SUPPORT MESSAGE */
   if (user && user.step === 'support' && msg.text) {
     await bot.sendMessage(
       ADMIN_CHAT_ID,
-      `📩 Support Message\nUser: ${chatId}\n\n${msg.text}`
+`🆘 Student Support Message
+
+👤 Telegram ID: ${chatId}
+
+💬 Message:
+${msg.text}
+
+✍️ Reply directly to answer the student
+Type /end to close chat`
     );
-    await bot.sendMessage(chatId, '✅ Message sent to support');
+
+    adminCurrentStudent = chatId;
+
+    await bot.sendMessage(chatId, '✅ Your message has been sent to support. Please wait for reply.');
     delete users[chatId];
     return;
   }
 
   if (!user) return;
+
+  /* ================= REGISTRATION FLOW ================= */
 
   if (user.step === 1 && msg.text) {
     user.name = msg.text;
@@ -97,7 +131,7 @@ bot.on('message', async (msg) => {
   if (user.step === 3 && msg.text) {
     user.phone = msg.text;
     user.step = 4;
-    return bot.sendMessage(chatId, '📚 Course Registered – (Type - Part Time / Full Time) ');
+    return bot.sendMessage(chatId, '📚 Course Registered – (Part Time / Full Time)');
   }
 
   if (user.step === 4 && msg.text) {
@@ -190,7 +224,7 @@ bot.on('callback_query', async (q) => {
     adminCurrentStudent = data.split('_')[1];
     await bot.sendMessage(
       ADMIN_CHAT_ID,
-      `✍️ Now chatting with student: ${adminCurrentStudent}`
+      `✍️ Now chatting with student: ${adminCurrentStudent}\nType /end to close`
     );
     return bot.answerCallbackQuery(q.id);
   }
