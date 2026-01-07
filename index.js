@@ -33,21 +33,31 @@ bot.onText(/\/start/, (msg) => {
     chatId,
 `👋 Welcome to Wisdom Exam Works Mentorship 👋
 
-Thank you for registering through our website.
+Thank you for registering through our website. For any Support contact Gmail: Wisdomexamworks@gmail.com
 
 To complete your submission, please share the details as mentioned.
 
 🔒 Privacy Assurance:
 Your details are confidential and visible only to our verification team.
-
+🔒 Notice:
+If you are facing any issue in providing details, Resart the Bot once again by giving start or delete the chat and enter again. 
 ✍️ Enter your *Registered Name*`,
-    { parse_mode: 'Markdown' }
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        keyboard: [
+          [{ text: '🆘 Support' }]
+        ],
+        resize_keyboard: true,
+        one_time_keyboard: false
+      }
+    }
   );
 });
 
-/* ================= SUPPORT COMMAND ================= */
+/* ================= SUPPORT (BUTTON & COMMAND) ================= */
 
-bot.onText(/\/support/, (msg) => {
+bot.onText(/\/support|🆘 Support/, (msg) => {
   const chatId = msg.chat.id;
   users[chatId] = { step: 'support' };
 
@@ -56,7 +66,12 @@ bot.onText(/\/support/, (msg) => {
 `🆘 Support Mode Activated
 
 ✍️ Please type your issue clearly.
-Our team will respond shortly.`
+Our team will respond shortly.`,
+    {
+      reply_markup: {
+        remove_keyboard: true
+      }
+    }
   );
 });
 
