@@ -21,7 +21,8 @@ app.use(express.json());
 /* ================= MEMORY ================= */
 
 const users = {};
-let adminCurrentStudent = null;
+let supportQueue = [];          // 🔥 QUEUE
+let adminCurrentStudent = null; // 🔥 ACTIVE CHAT
 
 /* ================= START ================= */
 
@@ -39,39 +40,36 @@ To complete your submission, please share the details as mentioned.
 
 🔒 Privacy Assurance:
 Your details are confidential and visible only to our verification team.
+
 🔒 Notice:
-If you are facing any issue in providing details, Resart the Bot once again by giving start or delete the chat and enter again. 
-✍️ Enter your *Registered Name*`,
+ If you are facing any issue in providing details, Resart the Bot once again by giving start or delete the chat and enter again.
+
+ If start does'nt proceed wait for few seconds or give start once again. 
+
+✍️ Enter your *Registered Name`,
     {
-      parse_mode: 'Markdown',
       reply_markup: {
-        keyboard: [
-          [{ text: '🆘 Support' }]
-        ],
-        resize_keyboard: true,
-        one_time_keyboard: false
+        keyboard: [[{ text: '🆘 Support' }]],
+        resize_keyboard: true
       }
     }
   );
 });
 
-/* ================= SUPPORT (BUTTON & COMMAND) ================= */
+/* ================= SUPPORT (BUTTON + COMMAND) ================= */
 
 bot.onText(/\/support|🆘 Support/, (msg) => {
   const chatId = msg.chat.id;
+
   users[chatId] = { step: 'support' };
 
   bot.sendMessage(
     chatId,
 `🆘 Support Mode Activated
 
-✍️ Please type your issue clearly.
-Our team will respond shortly.`,
-    {
-      reply_markup: {
-        remove_keyboard: true
-      }
-    }
+✍️ Please type your issue.
+You will be connected shortly.`,
+    { reply_markup: { remove_keyboard: true } }
   );
 });
 
@@ -81,48 +79,69 @@ bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const user = users[chatId];
 
-  /* 🔴 ADMIN → STUDENT DIRECT MESSAGE */
-  if (chatId.toString() === ADMIN_CHAT_ID && adminCurrentStudent) {
+  /* 🔴 ADMIN MESSAGE */
+  if (chatId.toString() === ADMIN_CHAT_ID) {
 
     if (msg.text === '/end') {
       adminCurrentStudent = null;
-      return bot.sendMessage(ADMIN_CHAT_ID, '✅ Support chat ended');
+
+      if (supportQueue.length > 0) {
+        adminCurrentStudent = supportQueue.shift();
+        return bot.sendMessage(
+          ADMIN_CHAT_ID,
+          `➡️ Next Student Connected: ${adminCurrentStudent}`
+        );
+      }
+
+      return bot.sendMessage(ADMIN_CHAT_ID, '✅ No pending support requests');
     }
 
-    if (msg.text) {
-      await bot.sendMessage(adminCurrentStudent, msg.text);
-    } else if (msg.photo) {
-      await bot.sendPhoto(
-        adminCurrentStudent,
-        msg.photo[msg.photo.length - 1].file_id
-      );
-    } else if (msg.document) {
-      await bot.sendDocument(
-        adminCurrentStudent,
-        msg.document.file_id
-      );
+    if (adminCurrentStudent) {
+      if (msg.text) {
+        return bot.sendMessage(adminCurrentStudent, msg.text);
+      }
+      if (msg.photo) {
+        return bot.sendPhoto(
+          adminCurrentStudent,
+          msg.photo[msg.photo.length - 1].file_id
+        );
+      }
+      if (msg.document) {
+        return bot.sendDocument(
+          adminCurrentStudent,
+          msg.document.file_id
+        );
+      }
     }
     return;
   }
 
   /* 🔵 STUDENT SUPPORT MESSAGE */
   if (user && user.step === 'support' && msg.text) {
+
+    supportQueue.push(chatId);
+
     await bot.sendMessage(
       ADMIN_CHAT_ID,
-`🆘 Student Support Message
+`🆕 Support Request Added
 
-👤 Telegram ID: ${chatId}
-
-💬 Message:
-${msg.text}
-
-✍️ Reply directly to answer the student
-Type /end to close chat`
+👤 Student ID: ${chatId}
+📌 Position in Queue: ${supportQueue.length}`
     );
 
-    adminCurrentStudent = chatId;
+    if (!adminCurrentStudent) {
+      adminCurrentStudent = supportQueue.shift();
+      await bot.sendMessage(
+        ADMIN_CHAT_ID,
+        `➡️ Connected to Student: ${adminCurrentStudent}`
+      );
+    }
 
-    await bot.sendMessage(chatId, '✅ Your message has been sent to support. Please wait for reply.');
+    await bot.sendMessage(
+      chatId,
+      '✅ Your issue is in queue. Please wait for admin reply.'
+    );
+
     delete users[chatId];
     return;
   }
@@ -134,63 +153,33 @@ Type /end to close chat`
   if (user.step === 1 && msg.text) {
     user.name = msg.text;
     user.step = 2;
-    return bot.sendMessage(chatId, '📧 Enter your Registered Email ID');
+    return bot.sendMessage(chatId, '📧 Enter Your Registered Email ID');
   }
 
   if (user.step === 2 && msg.text) {
     user.email = msg.text;
     user.step = 3;
-    return bot.sendMessage(chatId, '📞 Enter your Telegram Number');
+    return bot.sendMessage(chatId, '📞 Enter Telegram Number');
   }
 
   if (user.step === 3 && msg.text) {
     user.phone = msg.text;
     user.step = 4;
-    return bot.sendMessage(chatId, '📚 Course Registered – (Part Time / Full Time)');
+    return bot.sendMessage(chatId, '📚 Course (Part Time / Full Time)');
   }
 
   if (user.step === 4 && msg.text) {
     user.course = msg.text;
     user.step = 5;
-    return bot.sendMessage(chatId, '💳 UTR / Transaction Number (NOT UPI ID)');
+    return bot.sendMessage(chatId, '💳 Enter UTR/ Transaction Ref Number(NOT UPI ID)');
   }
 
   if (user.step === 5 && msg.text) {
     user.utr = msg.text;
     user.step = 6;
-    return bot.sendMessage(chatId, '📸 Upload your *Payment Screenshot*');
+    return bot.sendMessage(chatId, '📸 Upload Payment Screenshot');
   }
 });
-
-/* ================= GOOGLE SHEET ================= */
-
-async function sendToSheet(user, chatId, status = 'Pending') {
-  await fetch(SHEET_WEBHOOK_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: user.name,
-      email: user.email,
-      telegramId: chatId,
-      phone: user.phone,
-      course: user.course,
-      utr: user.utr,
-      status
-    })
-  });
-}
-
-async function updateStatus(chatId, status) {
-  await fetch(SHEET_WEBHOOK_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      mode: 'update',
-      telegramId: chatId,
-      status
-    })
-  });
-}
 
 /* ================= PHOTO HANDLER ================= */
 
@@ -205,57 +194,37 @@ bot.on('photo', async (msg) => {
     caption:
 `🧾 Payment Submission
 
-👤 Name: ${user.name}
-📧 Email: ${user.email}
-📞 Phone: ${user.phone}
-📚 Course: ${user.course}
-💳 UTR: ${user.utr}`,
+Name: ${user.name}
+Email: ${user.email}
+Phone: ${user.phone}
+Course: ${user.course}
+UTR: ${user.utr}`,
     reply_markup: {
       inline_keyboard: [
         [
           { text: '✅ Approve', callback_data: `approve_${chatId}` },
           { text: '❌ Reject', callback_data: `reject_${chatId}` }
-        ],
-        [
-          { text: '💬 Message Student', callback_data: `msg_${chatId}` }
         ]
       ]
     }
   });
 
-  await sendToSheet(user, chatId);
-
-  await bot.sendMessage(chatId, '✅ Payment received. Please wait for verification.');
+  await bot.sendMessage(chatId, '✅ Payment received. Please wait.');
   delete users[chatId];
 });
 
-/* ================= CALLBACK HANDLER ================= */
+/* ================= CALLBACK ================= */
 
 bot.on('callback_query', async (q) => {
-  const data = q.data;
-  const fromId = q.from.id.toString();
-
-  if (data.startsWith('msg_') && fromId === ADMIN_CHAT_ID) {
-    adminCurrentStudent = data.split('_')[1];
-    await bot.sendMessage(
-      ADMIN_CHAT_ID,
-      `✍️ Now chatting with student: ${adminCurrentStudent}\nType /end to close`
-    );
-    return bot.answerCallbackQuery(q.id);
-  }
-
-  if (fromId !== ADMIN_CHAT_ID) return;
-
-  const [action, id] = data.split('_');
+  const [action, id] = q.data.split('_');
+  if (q.from.id.toString() !== ADMIN_CHAT_ID) return;
 
   if (action === 'approve') {
-    await updateStatus(id, 'Approved');
-    await bot.sendMessage(id, '🎉 Your payment has been *Approved*', { parse_mode: 'Markdown' });
+    await bot.sendMessage(id, '🎉 Payment Approved');
   }
 
   if (action === 'reject') {
-    await updateStatus(id, 'Rejected');
-    await bot.sendMessage(id, '❌ Your payment has been *Rejected*', { parse_mode: 'Markdown' });
+    await bot.sendMessage(id, '❌ Payment Rejected');
   }
 });
 
@@ -271,5 +240,5 @@ app.listen(PORT, async () => {
   await bot.setWebHook(
     `https://telegram-payment-bot-3vk9.onrender.com/bot${token}`
   );
-  console.log('✅ Bot running with webhook');
+  console.log('✅ Bot running with support queue');
 });
