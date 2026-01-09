@@ -21,8 +21,8 @@ app.use(express.json());
 /* ================= MEMORY ================= */
 
 const users = {};
-let supportQueue = [];          // ✅ SUPPORT QUEUE
-let adminCurrentStudent = null; // ✅ ACTIVE STUDENT
+let supportQueue = [];          // FIFO queue
+let adminCurrentStudent = null; // currently chatting student
 
 /* ================= START ================= */
 
@@ -34,20 +34,19 @@ bot.onText(/\/start/, (msg) => {
     chatId,
 `👋 Welcome to Wisdom Exam Works Mentorship 👋
 
-Thank you for registering through our website. For any Support contact Gmail: Wisdomexamworks@gmail.com
+Thank you for registering through our website.
 
-To complete your submission, please share the details as mentioned.
+📧 Support Email: wisdomexamworks@gmail.com
 
 🔒 Privacy Assurance:
-Your details are confidential and visible only to our verification team.
+Your details are confidential.
 
-🔒 Notice:
- If you are facing any issue in providing details, Resart the Bot once again by giving start or delete the chat and enter again.
-
- If start does'nt proceed wait for few seconds or give start once again. 
+⚠️ Note:
+If you face any issue, restart the bot using /start
+or tap 🆘 Support.
 
 ✍️ Enter your *Registered Name*
-or tap 🆘 Support if you face any issue.`,
+or tap 🆘 Support if needed.`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
@@ -58,7 +57,7 @@ or tap 🆘 Support if you face any issue.`,
   );
 });
 
-/* ================= SUPPORT (COMMAND + BUTTON) ================= */
+/* ================= SUPPORT (BUTTON + COMMAND) ================= */
 
 bot.onText(/\/support|🆘 Support/, (msg) => {
   const chatId = msg.chat.id;
@@ -84,7 +83,7 @@ bot.on('message', async (msg) => {
 
   if (chatId.toString() === ADMIN_CHAT_ID) {
 
-    // End current chat → move to next
+    // End current chat and move to next
     if (msg.text === '/end') {
       adminCurrentStudent = null;
 
@@ -132,7 +131,6 @@ Reply now. Type /end to close.`
 
   if (user && user.step === 'support' && msg.text) {
 
-    // Add to queue with message
     supportQueue.push({
       chatId,
       message: msg.text
@@ -143,7 +141,6 @@ Reply now. Type /end to close.`
       '✅ Your issue has been sent to support. Please wait for reply.'
     );
 
-    // If admin is free, assign immediately
     if (!adminCurrentStudent) {
       const next = supportQueue.shift();
       adminCurrentStudent = next.chatId;
@@ -257,6 +254,9 @@ bot.on('photo', async (msg) => {
         [
           { text: '✅ Approve', callback_data: `approve_${chatId}` },
           { text: '❌ Reject', callback_data: `reject_${chatId}` }
+        ],
+        [
+          { text: '💬 Message Student', callback_data: `msg_${chatId}` }
         ]
       ]
     }
@@ -267,11 +267,25 @@ bot.on('photo', async (msg) => {
   delete users[chatId];
 });
 
-/* ================= CALLBACK ================= */
+/* ================= CALLBACK HANDLER ================= */
 
 bot.on('callback_query', async (q) => {
   const [action, id] = q.data.split('_');
   if (q.from.id.toString() !== ADMIN_CHAT_ID) return;
+
+  if (action === 'msg') {
+    adminCurrentStudent = id;
+
+    await bot.sendMessage(
+      ADMIN_CHAT_ID,
+`✍️ Manual Chat Opened
+
+👤 Student ID: ${id}
+Send text / photo / PDF.
+Type /end to close chat.`
+    );
+    return;
+  }
 
   if (action === 'approve') {
     await updateStatus(id, 'Approved');
@@ -296,5 +310,5 @@ app.listen(PORT, async () => {
   await bot.setWebHook(
     `https://telegram-payment-bot-3vk9.onrender.com/bot${token}`
   );
-  console.log('✅ Bot running with SUPPORT QUEUE');
+  console.log('✅ Bot running with SUPPORT QUEUE + MANUAL MESSAGE');
 });
