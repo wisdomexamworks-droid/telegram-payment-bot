@@ -43,7 +43,8 @@ Your details are confidential.
 
 ⚠️ Note:
 If you face any issue, restart the bot using /start
-or tap 🆘 Support.
+or 
+tap 🆘 Support.
 
 ✍️ Enter your *Registered Name*
 or tap 🆘 Support if needed.`,
