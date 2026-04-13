@@ -21,8 +21,8 @@ app.use(express.json());
 /* ================= MEMORY ================= */
 
 const users = {};
-let supportQueue = [];          // FIFO queue
-let adminCurrentStudent = null; // currently chatting student
+let supportQueue = [];
+let adminCurrentStudent = null;
 
 /* ================= START ================= */
 
@@ -43,11 +43,12 @@ Your details are confidential.
 
 ⚠️ Note:
 If you face any issue, restart the bot using /start
-or 
-tap 🆘 Support.
+or tap 🆘 Support.
+--------------------------------------------------------
 
 ✍️ Enter your *Registered Name*
-or tap 🆘 Support if needed.`,
+
+-------------------------------------------------------`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
@@ -58,7 +59,7 @@ or tap 🆘 Support if needed.`,
   );
 });
 
-/* ================= SUPPORT (BUTTON + COMMAND) ================= */
+/* ================= SUPPORT ================= */
 
 bot.onText(/\/support|🆘 Support/, (msg) => {
   const chatId = msg.chat.id;
@@ -78,13 +79,19 @@ You will be replied shortly.`,
 
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
+
+  // 🔥 FIX: ignore commands (/start, /support, /end)
+  if (msg.text && msg.text.startsWith('/')) return;
+
+  // Ignore non-text messages here
+  if (!msg.text) return;
+
   const user = users[chatId];
 
-  /* ================= ADMIN SIDE ================= */
+  /* ================= ADMIN ================= */
 
   if (chatId.toString() === ADMIN_CHAT_ID) {
 
-    // End current chat and move to next
     if (msg.text === '/end') {
       adminCurrentStudent = null;
 
@@ -107,30 +114,15 @@ Reply now. Type /end to close.`
       return bot.sendMessage(ADMIN_CHAT_ID, '✅ No pending support requests');
     }
 
-    // Admin replying to active student
     if (adminCurrentStudent) {
-      if (msg.text) {
-        return bot.sendMessage(adminCurrentStudent, msg.text);
-      }
-      if (msg.photo) {
-        return bot.sendPhoto(
-          adminCurrentStudent,
-          msg.photo[msg.photo.length - 1].file_id
-        );
-      }
-      if (msg.document) {
-        return bot.sendDocument(
-          adminCurrentStudent,
-          msg.document.file_id
-        );
-      }
+      return bot.sendMessage(adminCurrentStudent, msg.text);
     }
     return;
   }
 
-  /* ================= STUDENT SUPPORT MESSAGE ================= */
+  /* ================= SUPPORT FLOW ================= */
 
-  if (user && user.step === 'support' && msg.text) {
+  if (user && user.step === 'support') {
 
     supportQueue.push({
       chatId,
@@ -159,7 +151,7 @@ Reply now. Type /end to close.`
     } else {
       await bot.sendMessage(
         ADMIN_CHAT_ID,
-        `📥 New support request added to queue. Pending: ${supportQueue.length}`
+        `📥 Added to queue. Pending: ${supportQueue.length}`
       );
     }
 
@@ -169,36 +161,38 @@ Reply now. Type /end to close.`
 
   if (!user) return;
 
-  /* ================= REGISTRATION FLOW ================= */
+  /* ================= REGISTRATION ================= */
 
-  if (user.step === 1 && msg.text) {
-    user.name = msg.text;
+  if (user.step === 1) {
+    user.name = msg.text.trim();
     user.step = 2;
     return bot.sendMessage(chatId, '📧 Enter your Registered Email ID');
   }
 
-  if (user.step === 2 && msg.text) {
-    user.email = msg.text;
+  if (user.step === 2) {
+    user.email = msg.text.trim();
     user.step = 3;
     return bot.sendMessage(chatId, '📞 Enter your Telegram Number');
   }
 
-  if (user.step === 3 && msg.text) {
-    user.phone = msg.text;
+  if (user.step === 3) {
+    user.phone = msg.text.trim();
     user.step = 4;
     return bot.sendMessage(chatId, '📚 Course Registered – (Part Time / Full Time)');
   }
 
-  if (user.step === 4 && msg.text) {
-    user.course = msg.text;
+  if (user.step === 4) {
+    user.course = msg.text.trim();
     user.step = 5;
     return bot.sendMessage(chatId, '💳 UTR / Transaction Number (NOT UPI ID)');
   }
 
-  if (user.step === 5 && msg.text) {
-    user.utr = msg.text;
+  if (user.step === 5) {
+    user.utr = msg.text.trim();
     user.step = 6;
-    return bot.sendMessage(chatId, '📸 Upload your *Payment Screenshot*');
+    return bot.sendMessage(chatId, '📸 Upload your *Payment Screenshot*', {
+      parse_mode: 'Markdown'
+    });
   }
 });
 
@@ -232,7 +226,7 @@ async function updateStatus(chatId, status) {
   });
 }
 
-/* ================= PHOTO HANDLER ================= */
+/* ================= PHOTO ================= */
 
 bot.on('photo', async (msg) => {
   const chatId = msg.chat.id;
@@ -268,7 +262,7 @@ bot.on('photo', async (msg) => {
   delete users[chatId];
 });
 
-/* ================= CALLBACK HANDLER ================= */
+/* ================= CALLBACK ================= */
 
 bot.on('callback_query', async (q) => {
   const [action, id] = q.data.split('_');
@@ -277,25 +271,24 @@ bot.on('callback_query', async (q) => {
   if (action === 'msg') {
     adminCurrentStudent = id;
 
-    await bot.sendMessage(
+    return bot.sendMessage(
       ADMIN_CHAT_ID,
-`✍️ Manual Chat Opened
+`✍️ Chat Opened
 
 👤 Student ID: ${id}
-Send text / photo / PDF.
-Type /end to close chat.`
+Send message now.
+Type /end to close.`
     );
-    return;
   }
 
   if (action === 'approve') {
     await updateStatus(id, 'Approved');
-    await bot.sendMessage(id, '🎉 Your payment has been Approved');
+    return bot.sendMessage(id, '🎉 Your payment has been Approved');
   }
 
   if (action === 'reject') {
     await updateStatus(id, 'Rejected');
-    await bot.sendMessage(id, '❌ Your payment has been Rejected');
+    return bot.sendMessage(id, '❌ Your payment has been Rejected');
   }
 });
 
@@ -311,5 +304,5 @@ app.listen(PORT, async () => {
   await bot.setWebHook(
     `https://telegram-payment-bot-3vk9.onrender.com/bot${token}`
   );
-  console.log('✅ Bot running with SUPPORT QUEUE + MANUAL MESSAGE');
+  console.log('✅ Bot running PERFECTLY 🚀');
 });
